@@ -24,9 +24,9 @@ var title = []string{"单词", "释义", "熟练度"}
 func main() {
 
 	// debug
-	//os.Args = []string{"n", "example",
-	//	"Example is a noun commonly used to illustrate or demonstrate a concept, principle, or situation. For instance, in academic writing, examples help readers better understand theoretical points. If you need a more specific translation or usage context, feel free to provide additional details!",
-	//	"50"}
+	os.Args = []string{"", "n", "example",
+		"Example is a noun commonly used to illustrate or demonstrate a concept, principle, or situation. For instance, in academic writing, examples help readers better understand theoretical points. If you need a more specific translation or usage context, feel free to provide additional details!",
+		"50"}
 
 	// 检查命令行参数
 	if len(os.Args) < 4 || os.Args[1] != "n" {
