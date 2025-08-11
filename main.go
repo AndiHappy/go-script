@@ -28,9 +28,28 @@ func main() {
 		firstChapterURL = os.Args[1]
 	}
 
+	firstChapterURL = "https://www.drxsw.com/book/3570239/1944073676.html"
 	if firstChapterURL == "" {
 		log.Fatal("请提供起始章节的URL")
 		return
+	}
+
+	// 检查是否已经爬取过这本小说
+	progress, exists := utils.CheckNovelProgress(firstChapterURL)
+	if progress != nil {
+		if progress.HasError {
+			log.Printf("检测到小说《%s》上次爬取出现错误\n", progress.Title)
+			firstChapterURL = progress.LastChapterURL
+			log.Printf("将从上次出错的位置继续: %s\n", firstChapterURL)
+		} else if progress.IsCompleted && exists {
+			log.Printf("检测到小说《%s》已经爬取完成\n", progress.Title)
+			log.Println("已有完整内容，退出程序")
+			return
+		} else if exists {
+			log.Printf("检测到小说《%s》有未完成的爬取进度\n", progress.Title)
+			firstChapterURL = progress.LastChapterURL
+			log.Printf("将从上次爬取的位置继续: %s\n", firstChapterURL)
+		}
 	}
 
 	// 设置 Chrome 选项
@@ -66,45 +85,37 @@ func main() {
 
 	// 开始爬取章节
 	currentURL := firstChapterURL
-	chapterNum := 1
-	maxRetries := 3               // 最大重试次数
-	retryDelay := 2 * time.Second // 减少重试等待时间
-
+	var chapterNum = 1
 	for currentURL != "" {
 		var chapter *models.Chapter
 		var err error
 
 		// 添加重试机制
-		for retry := 0; retry < maxRetries; retry++ {
-			if retry > 0 {
-				log.Printf("第 %d 次重试爬取页面...\n", retry+1)
-				waitTime := retryDelay * time.Duration(retry+1) // 线性增加等待时间
-				log.Printf("等待时间增加到: %v\n", waitTime)
-				time.Sleep(waitTime)
-			}
-
-			chapter, err = scraper.ScrapeChapter(ctx, currentURL)
-			if err == nil {
-				break // 成功获取，退出重试循环
-			}
-
-			log.Printf("爬取失败: %v\n", err)
-		}
+		chapter, err = scraper.RetryScrapeChapter(ctx, currentURL, chapter)
 
 		if err != nil {
 			log.Printf("达到最大重试次数，放弃当前章节: %v\n", err)
+			utils.UpdateProgress(chapter.Title, currentURL, chapterNum, true)
 			break
 		}
 
 		// 保存章节内容
 		if err := utils.SaveChapter(chapter, chapterNum); err != nil {
 			log.Printf("保存章节失败: %v\n", err)
+			utils.UpdateProgress(chapter.Title, currentURL, chapterNum, true)
 			break
+		}
+
+		// 更新爬取进度
+		if err := utils.UpdateProgress(chapter.Title, currentURL, chapterNum, false); err != nil {
+			log.Printf("更新进度失败: %v\n", err)
 		}
 
 		// 每爬取10章就合并一次文件
 		if err := utils.MergeChapterFiles(10); err != nil {
 			log.Printf("合并文件失败: %v\n", err)
+			// 标记错误状态但继续尝试
+			utils.UpdateProgress(chapter.Title, currentURL, chapterNum, true)
 		}
 
 		// 更新URL到下一章
@@ -117,5 +128,15 @@ func main() {
 		time.Sleep(sleepTime)
 	}
 
+	// 合并所有剩余的章节文件
+	if err := utils.MergeChapterFiles(1); err != nil {
+		log.Printf("最终合并文件失败: %v\n", err)
+	}
+
 	log.Printf("爬取完成，共爬取 %d 章节\n", chapterNum-1)
+
+	// 标记完成状态
+	if progress != nil {
+		utils.UpdateProgress(progress.Title, currentURL, chapterNum-1, false)
+	}
 }

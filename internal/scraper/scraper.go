@@ -7,12 +7,50 @@ import (
 	"strings"
 	"time"
 
+	"chromedp-scraper/internal/config"
 	"chromedp-scraper/internal/models"
 	"chromedp-scraper/internal/utils"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/chromedp/chromedp"
 )
+
+var maxRetries = 3               // 最大重试次数
+var retryDelay = 1 * time.Second // 减少重试等待时间
+
+// RetryScrapeChapter 带重试机制的章节爬取
+func RetryScrapeChapter(ctx context.Context, currentURL string, chapter *models.Chapter) (*models.Chapter, error) {
+	var lastError error
+	for retry := 0; retry < maxRetries; retry++ {
+		if retry > 0 {
+			// 检查上一次错误是否可重试
+			if scrapeErr, ok := lastError.(*ScrapeError); ok && !scrapeErr.IsRetryable() {
+				log.Printf("错误不可重试，放弃后续尝试: %v\n", lastError)
+				return nil, lastError
+			}
+			log.Printf("第 %d 次重试爬取页面...\n", retry+1)
+			waitTime := retryDelay * time.Duration(retry+1) // 线性增加等待时间
+			log.Printf("等待时间增加到: %v\n", waitTime)
+			time.Sleep(waitTime)
+		}
+
+		chapter, err := ScrapeChapter(ctx, currentURL)
+		if err == nil {
+			return chapter, nil
+		}
+
+		lastError = err
+		if scrapeErr, ok := err.(*ScrapeError); ok {
+			log.Printf("爬取失败: [%v] %s\n", scrapeErr.Type, scrapeErr.Error())
+			if !scrapeErr.IsRetryable() {
+				return nil, err
+			}
+		} else {
+			log.Printf("爬取失败（未知错误）: %v\n", err)
+		}
+	}
+	return nil, lastError
+}
 
 // ScrapeChapter 爬取单个章节的内容
 func ScrapeChapter(ctx context.Context, url string) (*models.Chapter, error) {
@@ -31,51 +69,60 @@ func ScrapeChapter(ctx context.Context, url string) (*models.Chapter, error) {
 
 	// 获取页面 HTML
 	var html string
+	timeS := time.Now() // 记录开始时间
 	log.Println("等待页面加载...")
 	err := chromedp.Run(taskCtx,
 		chromedp.Navigate(url),
 		chromedp.WaitReady("body", chromedp.ByQuery),
-		chromedp.Sleep(1*time.Second), // 减少等待时间
 		chromedp.OuterHTML("html", &html, chromedp.ByQuery),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("页面加载失败: %v", err)
+		// 检查是否为超时错误
+		if strings.Contains(err.Error(), "timeout") || strings.Contains(err.Error(), "deadline exceeded") {
+			return nil, NewScrapeError(ErrorTypeTimeout, "页面加载超时", err)
+		}
+		return nil, NewScrapeError(ErrorTypeLoadFailed, "页面加载失败", err)
 	}
 
 	// 使用 goquery 解析 HTML
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
 	if err != nil {
-		return nil, fmt.Errorf("解析HTML失败: %v", err)
+		return nil, NewScrapeError(ErrorTypeParseError, "解析HTML失败", err)
+	}
+	log.Println("页面加载解析完成,耗时:", time.Since(timeS).Seconds(), "秒")
+
+	// 获取网站配置
+	siteConfig := config.GetSiteConfig(url)
+	if siteConfig == nil {
+		return nil, NewScrapeError(ErrorTypeNoConfig, "未找到网站配置", nil)
 	}
 
 	// 检查并设置小说标题
 	if utils.NovelTitle == "未命名" {
-		novelTitle := doc.Find("#wrapper > article > div.con_top > a:nth-child(2)").Text()
+		novelTitle := doc.Find(siteConfig.NovelTitleSelector).Text()
 		if novelTitle != "" {
 			utils.NovelTitle = strings.TrimSpace(novelTitle)
 			log.Printf("设置小说标题: %s\n", utils.NovelTitle)
 		}
 	}
 
-	// 获取标题
+	// 获取章节标题
 	log.Println("正在获取标题...")
-	titleSelectors := []string{"#chaptername", "h1", ".chapter-title"}
-	for _, selector := range titleSelectors {
+	for _, selector := range siteConfig.ChapterTitleSelectors {
 		if title := doc.Find(selector).First().Text(); title != "" {
 			chapter.Title = strings.TrimSpace(title)
 			break
 		}
 	}
 	if chapter.Title == "" {
-		return nil, fmt.Errorf("未找到标题")
+		return nil, NewScrapeError(ErrorTypeNoContent, "未找到章节标题", nil)
 	}
 	log.Printf("成功获取标题: %s\n", chapter.Title)
 
 	// 获取内容
 	log.Println("正在获取正文内容...")
-	contentSelectors := []string{"#chaptercontent", ".chapter-content", "#content"}
 	var content string
-	for _, selector := range contentSelectors {
+	for _, selector := range siteConfig.ContentSelectors {
 		if contentEl := doc.Find(selector).First(); contentEl.Length() > 0 {
 			// 移除所有 script 标签
 			contentEl.Find("script").Remove()
@@ -101,7 +148,7 @@ func ScrapeChapter(ctx context.Context, url string) (*models.Chapter, error) {
 		}
 	}
 	if content == "" {
-		return nil, fmt.Errorf("未找到正文内容")
+		return nil, NewScrapeError(ErrorTypeNoContent, "未找到正文内容", nil)
 	}
 	chapter.Content = content
 	log.Printf("成功获取正文，长度: %d 字符\n", len(chapter.Content))
@@ -115,10 +162,9 @@ func ScrapeChapter(ctx context.Context, url string) (*models.Chapter, error) {
 		baseURL = href
 	}
 
-	// 1. 通过 ID 查找
-	idSelectors := []string{"#next", "#nextChapter", "#next_chapter"}
-	for _, id := range idSelectors {
-		if href, exists := doc.Find(id).First().Attr("href"); exists {
+	// 1. 通过选择器查找
+	for _, selector := range siteConfig.NextChapterSelectors {
+		if href, exists := doc.Find(selector).First().Attr("href"); exists {
 			chapter.NextLink = utils.MakeAbsoluteURL(href, baseURL)
 			break
 		}
@@ -126,10 +172,9 @@ func ScrapeChapter(ctx context.Context, url string) (*models.Chapter, error) {
 
 	// 2. 通过文本内容查找
 	if chapter.NextLink == "" {
-		keywords := []string{"下一章", "下一页", "下页", "后一章", "下一节"}
 		doc.Find("a").Each(func(i int, s *goquery.Selection) {
 			text := strings.TrimSpace(s.Text())
-			for _, keyword := range keywords {
+			for _, keyword := range siteConfig.NextChapterKeywords {
 				if strings.Contains(text, keyword) {
 					if href, exists := s.Attr("href"); exists {
 						chapter.NextLink = utils.MakeAbsoluteURL(href, baseURL)
@@ -169,7 +214,7 @@ func ScrapeChapter(ctx context.Context, url string) (*models.Chapter, error) {
 
 	// 确保内容不为空
 	if chapter.Title == "" || chapter.Content == "" {
-		return nil, fmt.Errorf("failed to scrape chapter: empty content")
+		return nil, NewScrapeError(ErrorTypeNoContent, "章节内容或标题为空", nil)
 	}
 
 	return &chapter, nil
