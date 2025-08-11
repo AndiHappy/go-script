@@ -21,7 +21,6 @@ func main() {
 
 	// 获取os.arg的参数
 	// 这里可以根据需要修改为从命令行参数获取起始章节URL
-	// firstChapterURL := "https://www.3378.org/read/28595/8108534.html"
 	// 如果需要从命令行参数获取，可以使用 os.Args[1]
 	// 例如:
 	var firstChapterURL string
@@ -33,8 +32,6 @@ func main() {
 		log.Fatal("请提供起始章节的URL")
 		return
 	}
-
-	// firstChapterURL := "https://www.3378.org/read/28595/8108534.html"
 
 	// 设置 Chrome 选项
 	opts := utils.GetChromeOptions()
