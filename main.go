@@ -1,170 +1,124 @@
 package main
 
 import (
-	"bytes"
-	"encoding/csv"
-	"fmt"
-	"io"
+	"context"
+	"log"
+	"math/rand"
 	"os"
-	"sort"
-	"strconv"
-	"strings"
+	"path/filepath"
+	"time"
+
+	"chromedp-scraper/internal/models"
+	"chromedp-scraper/internal/scraper"
+	"chromedp-scraper/internal/utils"
+
+	"github.com/chromedp/chromedp"
 )
 
-var csvFilePath = "words.csv"
-
-type Record struct {
-	Word        string
-	Explain     string
-	Proficiency string
-}
-
-var title = []string{"单词", "释义", "熟练度"}
-
 func main() {
+	// 初始化随机数种子
+	rand.Seed(time.Now().UnixNano())
 
-	// debug
-	os.Args = []string{"", "n", "example",
-		"Example is a noun commonly used to illustrate or demonstrate a concept, principle, or situation. For instance, in academic writing, examples help readers better understand theoretical points. If you need a more specific translation or usage context, feel free to provide additional details!",
-		"50"}
+	// 获取os.arg的参数
+	// 这里可以根据需要修改为从命令行参数获取起始章节URL
+	// firstChapterURL := "https://www.3378.org/read/28595/8108534.html"
+	// 如果需要从命令行参数获取，可以使用 os.Args[1]
+	// 例如:
+	var firstChapterURL string
+	if len(os.Args) > 1 {
+		firstChapterURL = os.Args[1]
+	}
 
-	// 检查命令行参数
-	if len(os.Args) < 4 || os.Args[1] != "n" {
-		fmt.Println("使用方法: n <Word> <explain> <熟练度>")
+	if firstChapterURL == "" {
+		log.Fatal("请提供起始章节的URL")
 		return
 	}
 
-	fmt.Printf("Debug: %+v \n", os.Args)
+	// firstChapterURL := "https://www.3378.org/read/28595/8108534.html"
 
-	word := os.Args[2]
-	explain := os.Args[3]
-	proficiency, err := strconv.Atoi(os.Args[4])
-	if err != nil {
-		fmt.Printf("熟练度必须是数字: %v\n", err)
-		return
-	}
+	// 设置 Chrome 选项
+	opts := utils.GetChromeOptions()
 
-	// 处理命令
-	switch os.Args[1] {
-	case "n":
-		handleNoun(word, explain, proficiency)
-	default:
-		fmt.Println("未知命令")
-	}
-}
-
-func trapBOM(fileBytes []byte) []byte {
-	trimmedBytes := bytes.Trim(fileBytes, "\xef\xbb\xbf")
-	return trimmedBytes
-}
-
-func trapBOMString(s string) string {
-	trimmedBytes := strings.Trim(s, "\xef\xbb\xbf")
-	return trimmedBytes
-}
-
-// handleNoun 处理命令行n命令
-func handleNoun(word, explain string, proficiency int) {
-	fmt.Printf("处理名词: %s\n解释: %s\n熟练度: %d\n", word, explain, proficiency)
-	// 检查文件是否存在，不存在则创建
-	file, err := os.OpenFile(csvFilePath, os.O_RDWR|os.O_CREATE, 0644)
-	if err != nil {
-		fmt.Printf("打开文件失败: %v\n", err)
-		return
-	}
-	defer file.Close()
-
-	// 如果是新文件，写入UTF-8 BOM头
-	if stat, _ := file.Stat(); stat.Size() == 0 {
-		//预防写入中文,excel打开是乱码
-		if _, err := file.Write([]byte{0xEF, 0xBB, 0xBF}); err != nil {
-			fmt.Printf("写入BOM头失败: %v\n", err)
-			return
+	// 检查本地是否有 Chrome，如果没有则下载到项目目录
+	if !utils.CheckChromeInstalled() {
+		log.Println("Chrome not found, downloading...")
+		if err := utils.DownloadChrome(); err != nil {
+			log.Fatal("Failed to download Chrome:", err)
 		}
-		//写入标题
-		writer := csv.NewWriter(file)
-		err = writer.Write(title)
+		// 添加自定义 Chrome 路径
+		opts = append(opts, chromedp.ExecPath(filepath.Join(".", "chrome-linux", "chrome")))
+	}
+
+	// 创建一个根上下文
+	rootCtx := context.Background()
+
+	// 创建浏览器实例
+	allocCtx, allocCancel := chromedp.NewExecAllocator(rootCtx, opts...)
+	defer allocCancel()
+
+	// 创建浏览器上下文
+	browserCtx, browserCancel := chromedp.NewContext(
+		allocCtx,
+		chromedp.WithLogf(log.Printf), // 添加日志记录
+	)
+	defer browserCancel()
+
+	// 设置全局超时
+	ctx, cancel := context.WithTimeout(browserCtx, 24*time.Hour) // 设置一个较长的全局超时
+	defer cancel()
+
+	// 开始爬取章节
+	currentURL := firstChapterURL
+	chapterNum := 1
+	maxRetries := 3               // 最大重试次数
+	retryDelay := 2 * time.Second // 减少重试等待时间
+
+	for currentURL != "" {
+		var chapter *models.Chapter
+		var err error
+
+		// 添加重试机制
+		for retry := 0; retry < maxRetries; retry++ {
+			if retry > 0 {
+				log.Printf("第 %d 次重试爬取页面...\n", retry+1)
+				waitTime := retryDelay * time.Duration(retry+1) // 线性增加等待时间
+				log.Printf("等待时间增加到: %v\n", waitTime)
+				time.Sleep(waitTime)
+			}
+
+			chapter, err = scraper.ScrapeChapter(ctx, currentURL)
+			if err == nil {
+				break // 成功获取，退出重试循环
+			}
+
+			log.Printf("爬取失败: %v\n", err)
+		}
+
 		if err != nil {
-			fmt.Printf("写入标题失败: %v\n", err)
-			return
-		}
-		writer.Flush()
-	}
-
-	// 重置文件指针到开头
-	if _, err := file.Seek(0, 0); err != nil {
-		fmt.Printf("重置文件指针失败: %v\n", err)
-		return
-	}
-
-	// 读取现有数据
-	var records []Record
-	reader := csv.NewReader(file)
-	for {
-		row, err := reader.Read()
-		if err == io.EOF {
-			fmt.Println("文件读取结束")
+			log.Printf("达到最大重试次数，放弃当前章节: %v\n", err)
 			break
 		}
-		if err != nil && err != io.EOF {
-			fmt.Errorf("文件读取失败:%+v,Err:%+v", file, err)
+
+		// 保存章节内容
+		if err := utils.SaveChapter(chapter, chapterNum); err != nil {
+			log.Printf("保存章节失败: %v\n", err)
+			break
 		}
-		//cleanRow := trapBOMString(row[0])
-		//cleanTitle := strings.TrimSpace(title[0])
-		//if cleanRow == cleanTitle {
-		//	continue
-		//}
-		// 直接的跳过头标题
-		records = append(records, Record{row[0], row[1], row[2]})
-	}
 
-	// 添加新记录
-	newRecord := Record{Word: word, Explain: explain, Proficiency: strconv.Itoa(proficiency)}
-	records = append(records, newRecord)
-
-	// 检查是否已存在相同的单词
-	recordsMap := make(map[string]Record)
-	for _, record := range records {
-		recordsMap[record.Word] = record
-	}
-
-	if _, exists := recordsMap[word]; exists {
-		fmt.Printf("单词 '%s' 已存在，无法重复添加。\n", word)
-		record := recordsMap[word]
-		record.Explain = explain
-		record.Proficiency = strconv.Itoa(proficiency)
-		recordsMap[word] = record
-		fmt.Printf("已更新单词 '%s' 的解释和熟练度。\n", word)
-	}
-
-	// 根据Word字段排序
-	sort.Slice(records, func(i, j int) bool {
-		return records[i].Word > records[j].Word
-	})
-
-	//针对文件，进行覆盖性的重写
-	writer := csv.NewWriter(file)
-	defer writer.Flush()
-
-	// 清空文件内容
-	if err := file.Truncate(0); err != nil {
-		fmt.Printf("清空文件失败: %v\n", err)
-		return
-	}
-	if _, err := file.Seek(0, 0); err != nil {
-		fmt.Printf("重置文件指针失败: %v\n", err)
-		return
-	}
-
-	// 写入排序后的数据
-	for _, r := range recordsMap {
-		if strings.TrimSpace(r.Word) == strings.TrimSpace(title[0]) {
-			continue
+		// 每爬取10章就合并一次文件
+		if err := utils.MergeChapterFiles(10); err != nil {
+			log.Printf("合并文件失败: %v\n", err)
 		}
-		if err := writer.Write([]string{strings.TrimSpace(r.Word), r.Explain, r.Proficiency}); err != nil {
-			fmt.Printf("写入数据失败: %v\n", err)
-			return
-		}
+
+		// 更新URL到下一章
+		currentURL = chapter.NextLink
+		chapterNum++
+
+		// 随机延时 1-30 微秒，避免请求过快
+		sleepTime := time.Duration(1+rand.Intn(30)) * time.Microsecond
+		log.Printf("等待 %v 后继续爬取下一章...\n", sleepTime)
+		time.Sleep(sleepTime)
 	}
-	fmt.Printf("数据已排序插入: %s, %s, %d\n", word, explain, proficiency)
+
+	log.Printf("爬取完成，共爬取 %d 章节\n", chapterNum-1)
 }
