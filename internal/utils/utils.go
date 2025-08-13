@@ -14,9 +14,6 @@ import (
 	"github.com/chromedp/chromedp"
 )
 
-// NovelTitle 存储小说标题
-var NovelTitle string = "未命名"
-
 // SaveChapter 保存章节内容到文件
 func SaveChapter(chapter *models.Chapter, num int) error {
 	// 清理章节内容中的固定文本
@@ -24,7 +21,7 @@ func SaveChapter(chapter *models.Chapter, num int) error {
 	cleanContent = strings.TrimSpace(cleanContent) // 移除可能产生的多余空行
 
 	content := fmt.Sprintf("第%d章 %s\n\n%s\n", num, chapter.Title, cleanContent)
-	filename := fmt.Sprintf("chapter_%03d.txt", num)
+	filename := fmt.Sprintf("chapter_%04d.txt", num)
 
 	err := os.WriteFile(filename, []byte(content), 0644)
 	if err != nil {
@@ -149,9 +146,9 @@ func MakeAbsoluteURL(href, baseURL string) string {
 }
 
 // MergeChapterFiles 合并章节文件
-func MergeChapterFiles(batchSize int) error {
+func MergeChapterFiles(batchSize int, title string) error {
 	// 获取所有章节文件
-	files, err := filepath.Glob("chapter_*.txt")
+	files, err := filepath.Glob("chapter_????.txt")
 	if err != nil {
 		return err
 	}
@@ -171,7 +168,7 @@ func MergeChapterFiles(batchSize int) error {
 	}
 
 	// 定义合并文件的固定名称
-	mergedFilename := filepath.Join(mergedDir, fmt.Sprintf("20020908120445-%s.txt", NovelTitle))
+	mergedFilename := filepath.Join(mergedDir, fmt.Sprintf("20020908120445-%s.txt", title))
 	var allContents []string
 
 	// 如果合并文件已存在，先读取其内容

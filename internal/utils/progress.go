@@ -49,14 +49,13 @@ func GetNovelIdentifier(url string) string {
 
 // SaveProgress 保存爬取进度
 func SaveProgress(progress *models.NovelProgress) error {
-
 	// 创建进度目录
 	if err := os.MkdirAll(progressDir, 0755); err != nil {
 		return err
 	}
 
 	// 构建进度文件路径
-	filename := progress.URLIdentifier + progressExt
+	filename := progress.Title + progressExt
 	filepath := filepath.Join(progressDir, filename)
 
 	// 如果文件已存在，读取现有进度
@@ -88,8 +87,8 @@ func SaveProgress(progress *models.NovelProgress) error {
 }
 
 // LoadProgress 加载爬取进度
-func LoadProgress(urlIdentifier string) (*models.NovelProgress, error) {
-	filename := urlIdentifier + progressExt
+func LoadProgress(title string) (*models.NovelProgress, error) {
+	filename := title + progressExt
 	filepath := filepath.Join(progressDir, filename)
 
 	// 检查文件是否存在
@@ -117,10 +116,8 @@ func UpdateProgress(title, url string, chapterNum int, hasError bool) error {
 	UpdateProgressMutex.Lock()
 	defer UpdateProgressMutex.Unlock()
 
-	urlIdentifier := GetNovelIdentifier(url)
-
 	// 尝试加载现有进度
-	progress, err := LoadProgress(urlIdentifier)
+	progress, err := LoadProgress(title)
 	if err != nil {
 		return err
 	}
@@ -128,8 +125,7 @@ func UpdateProgress(title, url string, chapterNum int, hasError bool) error {
 	// 如果不存在则创建新的进度记录
 	if progress == nil {
 		progress = &models.NovelProgress{
-			Title:         title,
-			URLIdentifier: urlIdentifier,
+			Title: title,
 		}
 	}
 
@@ -144,11 +140,9 @@ func UpdateProgress(title, url string, chapterNum int, hasError bool) error {
 }
 
 // CheckNovelProgress 检查小说爬取进度
-func CheckNovelProgress(url string) (*models.NovelProgress, bool) {
-	urlIdentifier := GetNovelIdentifier(url)
-
+func CheckNovelProgress(novel *models.Novel) (*models.NovelProgress, bool) {
 	// 加载进度
-	progress, err := LoadProgress(urlIdentifier)
+	progress, err := LoadProgress(novel.Title)
 	if err != nil {
 		return nil, false
 	}

@@ -19,7 +19,8 @@ var maxRetries = 3               // 最大重试次数
 var retryDelay = 1 * time.Second // 减少重试等待时间
 
 // RetryScrapeChapter 带重试机制的章节爬取
-func RetryScrapeChapter(ctx context.Context, currentURL string, chapter *models.Chapter) (*models.Chapter, error) {
+func RetryScrapeChapter(ctx context.Context, currentURL string,
+	chapter *models.Chapter, novel *models.Novel) (*models.Chapter, error) {
 	var lastError error
 	for retry := 0; retry < maxRetries; retry++ {
 		if retry > 0 {
@@ -34,7 +35,7 @@ func RetryScrapeChapter(ctx context.Context, currentURL string, chapter *models.
 			time.Sleep(waitTime)
 		}
 
-		chapter, err := ScrapeChapter(ctx, currentURL)
+		chapter, err := ScrapeChapter(ctx, currentURL, novel)
 		if err == nil {
 			return chapter, nil
 		}
@@ -53,7 +54,7 @@ func RetryScrapeChapter(ctx context.Context, currentURL string, chapter *models.
 }
 
 // ScrapeChapter 爬取单个章节的内容
-func ScrapeChapter(ctx context.Context, url string) (*models.Chapter, error) {
+func ScrapeChapter(ctx context.Context, url string, novel *models.Novel) (*models.Chapter, error) {
 	var chapter models.Chapter
 
 	log.Printf("开始爬取页面: %s\n", url)
@@ -98,11 +99,11 @@ func ScrapeChapter(ctx context.Context, url string) (*models.Chapter, error) {
 	}
 
 	// 检查并设置小说标题
-	if utils.NovelTitle == "未命名" {
+	if novel.Title == "未命名" {
 		novelTitle := doc.Find(siteConfig.NovelTitleSelector).Text()
 		if novelTitle != "" {
-			utils.NovelTitle = strings.TrimSpace(novelTitle)
-			log.Printf("设置小说标题: %s\n", utils.NovelTitle)
+			novel.Title = strings.TrimSpace(novelTitle)
+			log.Printf("设置小说标题: %s\n", novel.Title)
 		}
 	}
 

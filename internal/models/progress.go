@@ -4,8 +4,6 @@ package models
 type NovelProgress struct {
 	// 小说标题
 	Title string `json:"title"`
-	// 小说URL标识（用于区分同名小说）
-	URLIdentifier string `json:"urlIdentifier"`
 	// 最后爬取的章节编号
 	LastChapterNum int `json:"lastChapter"`
 	// 最后爬取的章节URL
