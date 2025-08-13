@@ -15,6 +15,79 @@ import (
 	"github.com/chromedp/chromedp"
 )
 
+// Catalog 结构体用于存储目录信息
+type Catalog struct {
+	Title    string
+	Chapters []models.ChapterInfo
+}
+
+// ScrapeCatalog 爬取小说目录页面
+func ScrapeCatalog(ctx context.Context, url string) (*Catalog, error) {
+	// 获取网站配置
+	siteConfig := config.GetSiteConfig(url)
+	if siteConfig == nil {
+		return nil, NewScrapeError(ErrorTypeNoConfig, "未找到网站配置", nil)
+	}
+
+	var html string
+	timeS := time.Now() // 记录开始时间
+
+	// 加载页面
+	if err := chromedp.Run(ctx,
+		chromedp.Navigate(url),
+		chromedp.OuterHTML("html", &html),
+	); err != nil {
+		if strings.Contains(err.Error(), "timeout") || strings.Contains(err.Error(), "deadline exceeded") {
+			return nil, NewScrapeError(ErrorTypeTimeout, "页面加载超时", err)
+		}
+		return nil, NewScrapeError(ErrorTypeLoadFailed, "页面加载失败", err)
+	}
+
+	// 解析HTML
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		return nil, NewScrapeError(ErrorTypeParseError, "解析HTML失败", err)
+	}
+
+	log.Println("目录页面加载解析完成,耗时:", time.Since(timeS).Seconds(), "秒")
+
+	// 创建目录对象
+	catalog := &Catalog{}
+
+	// 获取小说标题
+	catalog.Title = doc.Find(siteConfig.NovelTitleSelector).Text()
+	catalog.Title = strings.TrimSpace(catalog.Title)
+
+	// 获取章节列表
+	chapters := make([]models.ChapterInfo, 0)
+	doc.Find(siteConfig.ChapterListSelector).Each(func(i int, s *goquery.Selection) {
+		href, exists := s.Attr("href")
+		if !exists {
+			return
+		}
+
+		title := strings.TrimSpace(s.Text())
+		if title == "" {
+			return
+		}
+
+		chapters = append(chapters, models.ChapterInfo{
+			Index: i + 1,
+			Title: title,
+			URL:   utils.MakeAbsoluteURL(href, url),
+		})
+	})
+
+	if len(chapters) == 0 {
+		return nil, NewScrapeError(ErrorTypeNoContent, "未找到章节列表", nil)
+	}
+
+	catalog.Chapters = chapters
+	log.Printf("成功获取目录，共 %d 章\n", len(chapters))
+
+	return catalog, nil
+}
+
 var maxRetries = 3               // 最大重试次数
 var retryDelay = 1 * time.Second // 减少重试等待时间
 

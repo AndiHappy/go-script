@@ -16,6 +16,8 @@ type SiteConfig struct {
 	Name string `json:"name"`
 	// 小说标题选择器
 	NovelTitleSelector string `json:"novelTitleSelector"`
+	// 目录页章节列表选择器
+	ChapterListSelector string `json:"chapterListSelector"`
 	// 章节标题选择器列表
 	ChapterTitleSelectors []string `json:"chapterTitleSelectors"`
 	// 章节内容选择器列表

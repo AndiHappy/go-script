@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"math/rand"
 	"os"
@@ -16,12 +17,162 @@ import (
 )
 
 func main() {
-	shouldReturn := LoadNovelFromFirstChapterLink()
-	if shouldReturn {
+
+	shouldReturn := LoadNovelFromCategoryChapterLink()
+	if shouldReturn != nil {
 		return
 	}
+
+	// shouldReturn2 := LoadNovelFromFirstChapterLink()
+	// if shouldReturn2 {
+	// 	return
+	// }
 }
 
+// LoadNovelFromCategoryChapterLink 根据目录页，首先统计出来目录页的所有章节的链接，然后再
+// 抓取每个章节的内容，最后将结果保存到文件中，这样爬取章节内容的时候，可以并发爬取
+func LoadNovelFromCategoryChapterLink() error {
+	// 初始化随机数种子
+	rand.Seed(time.Now().UnixNano())
+
+	// 获取目录页URL
+	catalogURL := "https://www.dxmwx.org/chapter/12865.html" // 设置默认值，也可以从命令行参数获取
+
+	// 检查是否已经爬取过这本小说
+	progress, err := utils.LoadProgress(utils.GetNovelIdentifier(catalogURL))
+	if err == nil && progress != nil {
+		if progress.IsCompleted {
+			log.Printf("检测到小说《%s》已经爬取完成\n", progress.Title)
+			log.Println("已有完整内容，退出程序")
+			return nil
+		}
+	}
+
+	// 设置 Chrome 选项
+	opts := utils.GetChromeOptions()
+
+	// 检查 Chrome 安装
+	if !utils.CheckChromeInstalled() {
+		return fmt.Errorf("请先安装 Chrome 浏览器")
+	}
+
+	// 创建上下文
+	rootCtx := context.Background()
+	allocCtx, allocCancel := chromedp.NewExecAllocator(rootCtx, opts...)
+	defer allocCancel()
+
+	browserCtx, browserCancel := chromedp.NewContext(
+		allocCtx,
+		chromedp.WithLogf(log.Printf),
+	)
+	defer browserCancel()
+
+	ctx, cancel := context.WithTimeout(browserCtx, 24*time.Hour)
+	defer cancel()
+
+	// 抓取目录
+	catalog, err := scraper.ScrapeCatalog(ctx, catalogURL)
+	if err != nil {
+		return fmt.Errorf("获取目录失败: %v", err)
+	}
+
+	// 创建工作池
+	workerCount := 5 // 同时爬取的章节数
+	batchSize := 10  // 每批处理的章节数
+	totalChapters := len(catalog.Chapters)
+
+	for i := 0; i < totalChapters; i += batchSize {
+		// 确定当前批次的结束索引
+		end := i + batchSize
+		if end > totalChapters {
+			end = totalChapters
+		}
+
+		// 当前批次的章节
+		currentBatch := catalog.Chapters[i:end]
+
+		// 创建用于当前批次的通道
+		chapterChan := make(chan models.ChapterInfo, len(currentBatch))
+		resultChan := make(chan *models.Chapter, workerCount)
+		errorChan := make(chan error, workerCount)
+		doneChan := make(chan bool)
+
+		// 启动工作协程
+		for w := 0; w < workerCount; w++ {
+			go func() {
+				for chapter := range chapterChan {
+					// 检查是否需要爬取这一章
+					if progress != nil && progress.LastChapterURL == chapter.URL {
+						continue
+					}
+
+					// 随机延时，避免请求过快
+					time.Sleep(time.Duration(rand.Intn(1000)) * time.Millisecond)
+
+					// 爬取章节内容
+					novel := &models.Novel{
+						Title: catalog.Title,
+					}
+					chapterContent, err := scraper.ScrapeChapter(ctx, chapter.URL, novel)
+					if err != nil {
+						errorChan <- fmt.Errorf("章节 %d 爬取失败: %v", chapter.Index, err)
+						continue
+					}
+
+					// 保存章节
+					if err := utils.SaveChapter(chapterContent, chapter.Index); err != nil {
+						errorChan <- fmt.Errorf("章节 %d 保存失败: %v", chapter.Index, err)
+						continue
+					}
+
+					// 更新进度
+					utils.UpdateProgress(catalog.Title, chapter.URL, chapter.Index, false)
+
+					// 发送结果
+					resultChan <- chapterContent
+				}
+				doneChan <- true
+			}()
+		}
+
+		// 发送章节到工作池
+		go func() {
+			for _, chapter := range currentBatch {
+				chapterChan <- chapter
+			}
+			close(chapterChan)
+		}()
+
+		// 等待当前批次完成
+		finished := 0
+		for finished < workerCount {
+			select {
+			case err := <-errorChan:
+				log.Println("错误:", err)
+			case <-resultChan:
+				// 每完成一批就合并一次文件
+				if err := utils.MergeChapterFiles(batchSize, catalog.Title); err != nil {
+					log.Printf("合并文件失败: %v\n", err)
+				}
+			case <-doneChan:
+				finished++
+			}
+		}
+	}
+
+	// 最终合并所有文件
+	if err := utils.MergeChapterFiles(1, catalog.Title); err != nil {
+		log.Printf("最终合并文件失败: %v\n", err)
+	}
+
+	log.Printf("爬取完成，共处理 %d 章节\n", totalChapters)
+
+	// 标记完成状态
+	utils.UpdateProgress(catalog.Title, catalogURL, totalChapters, true)
+	return nil
+}
+
+// LoadNovelFromFirstChapterLink 根据起始章节的链接，抓取该章节的内容
 func LoadNovelFromFirstChapterLink() bool {
 	var firstChapterURL string
 	var startChapterNum int

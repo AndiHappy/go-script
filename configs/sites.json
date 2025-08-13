@@ -4,6 +4,7 @@
             "host": "3378.org",
             "name": "笔趣阁",
             "novelTitleSelector": "#wrapper > article > div.con_top > a:nth-child(2)",
+            "chapterListSelector": "#list > dl > dd > a",
             "chapterTitleSelectors": [
                 "#chaptername",
                 "h1",

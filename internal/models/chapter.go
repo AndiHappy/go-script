@@ -13,3 +13,10 @@ type Chapter struct {
 	Content  string
 	NextLink string
 }
+
+// ChapterInfo 结构体用于存储目录页面的章节信息
+type ChapterInfo struct {
+	Index int    // 章节序号
+	Title string // 章节标题
+	URL   string // 章节链接
+}
