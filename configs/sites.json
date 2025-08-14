@@ -3,8 +3,12 @@
         "3378.org": {
             "host": "3378.org",
             "name": "笔趣阁",
-            "novelTitleSelector": "#wrapper > article > div.con_top > a:nth-child(2)",
-            "chapterListSelector": "#list > dl > dd > a",
+            "novelTitleSelectors": [
+                "#wrapper > article > div.con_top > a:nth-child(2)"
+            ],
+            "chapterListSelectors": [
+                "#list > dl > dd > a"
+            ],
             "chapterTitleSelectors": [
                 "#chaptername",
                 "h1",
@@ -31,8 +35,10 @@
         },
         "drxsw.com": {
             "host": "drxsw.com",
-            "name": "读入小说网",
-            "novelTitleSelector": "#readbg > div.top > div > div > a:nth-child(3)",
+            "novelTitleSelectors": [
+                "#readbg > div.top > div > div > a:nth-child(3)",
+                "body > div > div:nth-child(4) > div:nth-child(2)"
+            ],
             "chapterTitleSelectors": [
                 "h1.chapter-title",
                 ".chapter-name",
@@ -53,9 +59,14 @@
             ]
         },
         "dxmwx.org": {
-            "host": "drxsw.com",
-            "name": "读入小说网",
-            "novelTitleSelector": "#readbg > div.top > div > div > a:nth-child(3)",
+            "host": "dxmwx.org",
+            "novelTitleSelectors": [
+                "#readbg > div.top > div > div > a:nth-child(3)",
+                "body > div > div:nth-child(4) > div:nth-child(2)"
+            ],
+            "chapterListSelectors": [
+                "body > div > div:nth-child(4)"
+            ],
             "chapterTitleSelectors": [
                 "h1.chapter-title",
                 ".chapter-name",

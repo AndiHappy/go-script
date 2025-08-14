@@ -22,9 +22,9 @@ type Catalog struct {
 }
 
 // ScrapeCatalog 爬取小说目录页面
-func ScrapeCatalog(ctx context.Context, url string) (*Catalog, error) {
+func ScrapeCatalog(ctx context.Context, u string) (*Catalog, error) {
 	// 获取网站配置
-	siteConfig := config.GetSiteConfig(url)
+	siteConfig := config.GetSiteConfig(u)
 	if siteConfig == nil {
 		return nil, NewScrapeError(ErrorTypeNoConfig, "未找到网站配置", nil)
 	}
@@ -34,8 +34,15 @@ func ScrapeCatalog(ctx context.Context, url string) (*Catalog, error) {
 
 	// 加载页面
 	if err := chromedp.Run(ctx,
-		chromedp.Navigate(url),
+		chromedp.Navigate(u),
 		chromedp.OuterHTML("html", &html),
+		// // 等待页面加载完成，这里使用章节列表的常见选择器
+		// // 你可能需要根据实际页面结构调整选择器
+		// chromedp.WaitVisible(`div.chapterlist`, chromedp.ByQuery),
+		// // 提取所有章节链接
+		// chromedp.Evaluate(`
+		// 	Array.from(document.querySelectorAll('div.chapterlist a')).map(link => link.href)
+		// `, &chapterLinks),
 	); err != nil {
 		if strings.Contains(err.Error(), "timeout") || strings.Contains(err.Error(), "deadline exceeded") {
 			return nil, NewScrapeError(ErrorTypeTimeout, "页面加载超时", err)
@@ -53,30 +60,39 @@ func ScrapeCatalog(ctx context.Context, url string) (*Catalog, error) {
 
 	// 创建目录对象
 	catalog := &Catalog{}
-
-	// 获取小说标题
-	catalog.Title = doc.Find(siteConfig.NovelTitleSelector).Text()
+	// 获取章节标题
+	log.Println("正在获取标题...")
+	for _, selector := range siteConfig.NovelTitleSelectors {
+		if title := doc.Find(selector).First().Text(); title != "" {
+			catalog.Title = strings.TrimSpace(title)
+			break
+		}
+	}
 	catalog.Title = strings.TrimSpace(catalog.Title)
 
 	// 获取章节列表
 	chapters := make([]models.ChapterInfo, 0)
-	doc.Find(siteConfig.ChapterListSelector).Each(func(i int, s *goquery.Selection) {
-		href, exists := s.Attr("href")
-		if !exists {
-			return
-		}
+	log.Println("正在获取章节列表...")
 
-		title := strings.TrimSpace(s.Text())
-		if title == "" {
-			return
-		}
+	for _, selector := range siteConfig.ChapterListSelectors {
+		doc.Find(selector).Each(func(i int, s *goquery.Selection) {
+			href, exists := s.Attr("href")
+			if !exists {
+				return
+			}
 
-		chapters = append(chapters, models.ChapterInfo{
-			Index: i + 1,
-			Title: title,
-			URL:   utils.MakeAbsoluteURL(href, url),
+			title := strings.TrimSpace(s.Text())
+			if title == "" {
+				return
+			}
+
+			chapters = append(chapters, models.ChapterInfo{
+				Index: i + 1,
+				Title: title,
+				URL:   utils.MakeAbsoluteURL(href, u),
+			})
 		})
-	})
+	}
 
 	if len(chapters) == 0 {
 		return nil, NewScrapeError(ErrorTypeNoContent, "未找到章节列表", nil)
@@ -173,10 +189,13 @@ func ScrapeChapter(ctx context.Context, url string, novel *models.Novel) (*model
 
 	// 检查并设置小说标题
 	if novel.Title == "未命名" {
-		novelTitle := doc.Find(siteConfig.NovelTitleSelector).Text()
-		if novelTitle != "" {
-			novel.Title = strings.TrimSpace(novelTitle)
-			log.Printf("设置小说标题: %s\n", novel.Title)
+		log.Println("正在获取小说标题...")
+		for _, selector := range siteConfig.NovelTitleSelectors {
+			if title := doc.Find(selector).First().Text(); title != "" {
+				novel.Title = strings.TrimSpace(title)
+				log.Printf("设置小说标题: %s\n", novel.Title)
+				break
+			}
 		}
 	}
 

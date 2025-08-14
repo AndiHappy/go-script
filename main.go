@@ -20,6 +20,7 @@ func main() {
 
 	shouldReturn := LoadNovelFromCategoryChapterLink()
 	if shouldReturn != nil {
+		log.Fatal(shouldReturn)
 		return
 	}
 
@@ -32,21 +33,9 @@ func main() {
 // LoadNovelFromCategoryChapterLink 根据目录页，首先统计出来目录页的所有章节的链接，然后再
 // 抓取每个章节的内容，最后将结果保存到文件中，这样爬取章节内容的时候，可以并发爬取
 func LoadNovelFromCategoryChapterLink() error {
-	// 初始化随机数种子
-	rand.Seed(time.Now().UnixNano())
 
 	// 获取目录页URL
 	catalogURL := "https://www.dxmwx.org/chapter/12865.html" // 设置默认值，也可以从命令行参数获取
-
-	// 检查是否已经爬取过这本小说
-	progress, err := utils.LoadProgress(utils.GetNovelIdentifier(catalogURL))
-	if err == nil && progress != nil {
-		if progress.IsCompleted {
-			log.Printf("检测到小说《%s》已经爬取完成\n", progress.Title)
-			log.Println("已有完整内容，退出程序")
-			return nil
-		}
-	}
 
 	// 设置 Chrome 选项
 	opts := utils.GetChromeOptions()
@@ -74,6 +63,16 @@ func LoadNovelFromCategoryChapterLink() error {
 	catalog, err := scraper.ScrapeCatalog(ctx, catalogURL)
 	if err != nil {
 		return fmt.Errorf("获取目录失败: %v", err)
+	}
+
+	// 检查是否已经爬取过这本小说
+	progress, err := utils.LoadProgress(utils.GetNovelIdentifier(catalogURL))
+	if err == nil && progress != nil {
+		if progress.IsCompleted {
+			log.Printf("检测到小说《%s》已经爬取完成\n", progress.Title)
+			log.Println("已有完整内容，退出程序")
+			return nil
+		}
 	}
 
 	// 创建工作池

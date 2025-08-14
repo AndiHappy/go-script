@@ -14,10 +14,10 @@ type SiteConfig struct {
 	Host string `json:"host"`
 	// 网站名称
 	Name string `json:"name"`
-	// 小说标题选择器
-	NovelTitleSelector string `json:"novelTitleSelector"`
+	// 小说标题选择器列表
+	NovelTitleSelectors []string `json:"novelTitleSelectors"`
 	// 目录页章节列表选择器
-	ChapterListSelector string `json:"chapterListSelector"`
+	ChapterListSelectors []string `json:"chapterListSelectors"`
 	// 章节标题选择器列表
 	ChapterTitleSelectors []string `json:"chapterTitleSelectors"`
 	// 章节内容选择器列表
