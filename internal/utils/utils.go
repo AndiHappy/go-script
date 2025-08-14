@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"math/rand"
@@ -13,6 +14,15 @@ import (
 
 	"github.com/chromedp/chromedp"
 )
+
+func ToString(v any) string {
+	bytes, err := json.Marshal(v)
+	if err != nil {
+		log.Fatal("json Marshal Err: ", err)
+		return ""
+	}
+	return string(bytes)
+}
 
 // SaveChapter 保存章节内容到文件
 func SaveChapter(chapter *models.Chapter, num int) error {
@@ -143,6 +153,43 @@ func MakeAbsoluteURL(href, baseURL string) string {
 		return baseURL[:lastSlash+1] + href
 	}
 	return baseURL + "/" + href
+}
+
+// MergeChaptersToFile 合并catalog中所有章节的Content内容，并写入指定文件
+// 参数：
+//
+//	catalog: 包含章节列表的目录结构体
+//	filePath: 目标文件路径（如 "./output.txt"）
+//
+// 返回：
+//
+//	error: 若过程中出现错误（如目录为空、文件写入失败等），返回具体错误信息；成功则返回nil
+func MergeChaptersToFile(catalog *models.Catalog, filePath string) error {
+	// 1. 检查入参合法性
+	if catalog == nil {
+		return nil // 或返回错误：fmt.Errorf("catalog不能为空")
+	}
+	if len(catalog.Chapters) == 0 {
+		return nil // 或返回错误：fmt.Errorf("章节列表为空，无需合并")
+	}
+
+	// 2. 初始化字符串构建器，高效拼接大量字符串
+	var contentBuilder strings.Builder
+
+	// 3. 遍历所有章节，合并内容
+	for i, chapter := range catalog.Chapters {
+		// 写入当前章节内容
+		contentBuilder.WriteString(chapter.ChapterContent)
+
+		// 章节间添加分隔符（如换行），最后一章不需要
+		if i != len(catalog.Chapters)-1 {
+			contentBuilder.WriteString("\n\n") // 用两个换行分隔章节，增强可读性
+		}
+	}
+
+	// 4. 将合并后的内容写入文件
+	// 0644 表示文件权限：所有者可读写，其他用户可读
+	return os.WriteFile(filePath, []byte(contentBuilder.String()), 0644)
 }
 
 // MergeChapterFiles 合并章节文件

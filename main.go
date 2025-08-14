@@ -65,18 +65,12 @@ func LoadNovelFromCategoryChapterLink() error {
 		return fmt.Errorf("获取目录失败: %v", err)
 	}
 
-	// 检查是否已经爬取过这本小说
-	progress, err := utils.LoadProgress(utils.GetNovelIdentifier(catalogURL))
-	if err == nil && progress != nil {
-		if progress.IsCompleted {
-			log.Printf("检测到小说《%s》已经爬取完成\n", progress.Title)
-			log.Println("已有完整内容，退出程序")
-			return nil
-		}
+	for _, ch := range catalog.Chapters {
+		log.Printf("Index: %d, Title: %s", ch.Index, ch.Title)
 	}
 
 	// 创建工作池
-	workerCount := 5 // 同时爬取的章节数
+	workerCount := 1 // 同时爬取的章节数
 	batchSize := 10  // 每批处理的章节数
 	totalChapters := len(catalog.Chapters)
 
@@ -89,7 +83,6 @@ func LoadNovelFromCategoryChapterLink() error {
 
 		// 当前批次的章节
 		currentBatch := catalog.Chapters[i:end]
-
 		// 创建用于当前批次的通道
 		chapterChan := make(chan models.ChapterInfo, len(currentBatch))
 		resultChan := make(chan *models.Chapter, workerCount)
@@ -100,33 +93,24 @@ func LoadNovelFromCategoryChapterLink() error {
 		for w := 0; w < workerCount; w++ {
 			go func() {
 				for chapter := range chapterChan {
-					// 检查是否需要爬取这一章
-					if progress != nil && progress.LastChapterURL == chapter.URL {
-						continue
-					}
-
 					// 随机延时，避免请求过快
 					time.Sleep(time.Duration(rand.Intn(1000)) * time.Millisecond)
 
-					// 爬取章节内容
 					novel := &models.Novel{
 						Title: catalog.Title,
 					}
+
+					// 爬取章节内容
 					chapterContent, err := scraper.ScrapeChapter(ctx, chapter.URL, novel)
 					if err != nil {
 						errorChan <- fmt.Errorf("章节 %d 爬取失败: %v", chapter.Index, err)
 						continue
 					}
-
 					// 保存章节
 					if err := utils.SaveChapter(chapterContent, chapter.Index); err != nil {
 						errorChan <- fmt.Errorf("章节 %d 保存失败: %v", chapter.Index, err)
 						continue
 					}
-
-					// 更新进度
-					utils.UpdateProgress(catalog.Title, chapter.URL, chapter.Index, false)
-
 					// 发送结果
 					resultChan <- chapterContent
 				}
@@ -165,9 +149,6 @@ func LoadNovelFromCategoryChapterLink() error {
 	}
 
 	log.Printf("爬取完成，共处理 %d 章节\n", totalChapters)
-
-	// 标记完成状态
-	utils.UpdateProgress(catalog.Title, catalogURL, totalChapters, true)
 	return nil
 }
 

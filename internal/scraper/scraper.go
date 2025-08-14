@@ -15,14 +15,8 @@ import (
 	"github.com/chromedp/chromedp"
 )
 
-// Catalog 结构体用于存储目录信息
-type Catalog struct {
-	Title    string
-	Chapters []models.ChapterInfo
-}
-
 // ScrapeCatalog 爬取小说目录页面
-func ScrapeCatalog(ctx context.Context, u string) (*Catalog, error) {
+func ScrapeCatalog(ctx context.Context, u string) (*models.Catalog, error) {
 	// 获取网站配置
 	siteConfig := config.GetSiteConfig(u)
 	if siteConfig == nil {
@@ -36,13 +30,6 @@ func ScrapeCatalog(ctx context.Context, u string) (*Catalog, error) {
 	if err := chromedp.Run(ctx,
 		chromedp.Navigate(u),
 		chromedp.OuterHTML("html", &html),
-		// // 等待页面加载完成，这里使用章节列表的常见选择器
-		// // 你可能需要根据实际页面结构调整选择器
-		// chromedp.WaitVisible(`div.chapterlist`, chromedp.ByQuery),
-		// // 提取所有章节链接
-		// chromedp.Evaluate(`
-		// 	Array.from(document.querySelectorAll('div.chapterlist a')).map(link => link.href)
-		// `, &chapterLinks),
 	); err != nil {
 		if strings.Contains(err.Error(), "timeout") || strings.Contains(err.Error(), "deadline exceeded") {
 			return nil, NewScrapeError(ErrorTypeTimeout, "页面加载超时", err)
@@ -59,7 +46,7 @@ func ScrapeCatalog(ctx context.Context, u string) (*Catalog, error) {
 	log.Println("目录页面加载解析完成,耗时:", time.Since(timeS).Seconds(), "秒")
 
 	// 创建目录对象
-	catalog := &Catalog{}
+	catalog := &models.Catalog{}
 	// 获取章节标题
 	log.Println("正在获取标题...")
 	for _, selector := range siteConfig.NovelTitleSelectors {
@@ -73,9 +60,8 @@ func ScrapeCatalog(ctx context.Context, u string) (*Catalog, error) {
 	// 获取章节列表
 	chapters := make([]models.ChapterInfo, 0)
 	log.Println("正在获取章节列表...")
-
 	for _, selector := range siteConfig.ChapterListSelectors {
-		doc.Find(selector).Each(func(i int, s *goquery.Selection) {
+		doc.Find(selector).Find("a").Each(func(i int, s *goquery.Selection) {
 			href, exists := s.Attr("href")
 			if !exists {
 				return
@@ -86,11 +72,15 @@ func ScrapeCatalog(ctx context.Context, u string) (*Catalog, error) {
 				return
 			}
 
-			chapters = append(chapters, models.ChapterInfo{
-				Index: i + 1,
-				Title: title,
-				URL:   utils.MakeAbsoluteURL(href, u),
-			})
+			if strings.Contains(title, "第") { //这种确定链接的方式，有点low，后续进行选择性的抓取
+				chapters = append(chapters, models.ChapterInfo{
+					Index: i + 1,
+					Title: title,
+					URL:   utils.MakeAbsoluteURL(href, u),
+				})
+			} else {
+				log.Println("跳过该a: ", s.Text(), href)
+			}
 		})
 	}
 

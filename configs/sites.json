@@ -73,6 +73,7 @@
                 "h1"
             ],
             "contentSelectors": [
+                "#Lab_Contents",
                 "#content",
                 ".chapter-content",
                 "#TextContent"
